@@ -1,0 +1,186 @@
+﻿<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3a7d3a" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#24502a" media="(prefers-color-scheme: dark)">
+  <title>Meine Rezepte</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="kopf">
+    <button id="zurueck" class="kopf-knopf" type="button" aria-label="Zurück" hidden>‹</button>
+    <h1 id="titel">Rezepte</h1>
+    <button id="bearbeiten" class="kopf-knopf" type="button" aria-label="Rezept bearbeiten" hidden>✎</button>
+    <button id="sync" class="kopf-knopf" type="button" aria-label="Jetzt abgleichen" hidden>☁</button>
+    <button id="einstellungen" class="kopf-knopf" type="button" aria-label="Einstellungen">⚙</button>
+  </header>
+
+  <p id="status" class="status" role="status" hidden></p>
+
+  <main>
+    <section id="ansicht-liste" class="ansicht">
+      <input id="suche" type="search" placeholder="Rezept oder Zutat suchen …" aria-label="Rezepte durchsuchen" autocomplete="off">
+      <div id="filter" class="chips"></div>
+      <div class="sortierung">
+        <span id="anzahl"></span>
+        <label>Sortieren
+          <select id="sortierung">
+            <option value="neu">Zuletzt hinzugefügt</option>
+            <option value="titel">Name</option>
+            <option value="zeit">Schnellste zuerst</option>
+          </select>
+        </label>
+      </div>
+      <div id="liste" class="karten"></div>
+    </section>
+
+    <section id="ansicht-rezept" class="ansicht" hidden>
+      <div id="rezept-detail"></div>
+    </section>
+
+    <section id="ansicht-einkauf" class="ansicht" hidden>
+      <form id="form-einkauf" class="suchzeile">
+        <input name="text" placeholder="Etwas hinzufügen, z. B. 1 l Milch" aria-label="Eintrag für die Einkaufsliste" autocomplete="off" enterkeyhint="done" maxlength="200">
+        <button class="haupt" type="submit" aria-label="Hinzufügen">+</button>
+      </form>
+      <div id="einkauf-liste"></div>
+      <div id="einkauf-knoepfe" class="knoepfe">
+        <button id="einkauf-teilen" type="button">📤 Teilen</button>
+        <span class="platz"></span>
+        <button id="einkauf-aufraeumen" type="button">Erledigte entfernen</button>
+      </div>
+    </section>
+  </main>
+
+  <button id="neu" class="neu-knopf" type="button" aria-label="Rezept hinzufügen">+</button>
+
+  <nav class="navi">
+    <button type="button" data-ansicht="liste" class="aktiv"><span aria-hidden="true">🍲</span>Rezepte</button>
+    <button type="button" data-ansicht="einkauf"><span aria-hidden="true">🛒</span>Einkaufsliste<b id="einkauf-zahl" class="zahl" hidden></b></button>
+  </nav>
+
+  <!-- Rezept über Link laden oder von Hand anlegen -->
+  <dialog id="dlg-import">
+    <h2>Rezept hinzufügen</h2>
+    <p class="hinweis">Füge den Link zu einem Rezept ein, z. B. von Chefkoch. Zutaten und Zubereitung werden automatisch übernommen.</p>
+    <form id="form-import" novalidate>
+      <div class="suchzeile">
+        <input name="url" type="url" inputmode="url" placeholder="https://www.chefkoch.de/rezepte/…" aria-label="Link zum Rezept" autocomplete="off" enterkeyhint="go">
+        <button id="einfuegen" type="button" aria-label="Aus der Zwischenablage einfügen" title="Einfügen">📋</button>
+      </div>
+      <button id="laden" class="haupt breit" type="submit">Rezept laden</button>
+    </form>
+    <p id="import-status" class="import-status" aria-live="polite" hidden></p>
+    <div class="knoepfe">
+      <button id="manuell" type="button">Von Hand eintragen</button>
+      <span class="platz"></span>
+      <button type="button" data-schliessen>Schließen</button>
+    </div>
+  </dialog>
+
+  <!-- Rezept bearbeiten -->
+  <dialog id="dlg-formular" class="gross">
+    <form id="form-rezept" novalidate>
+      <h2 id="formular-titel">Rezept eintragen</h2>
+      <p id="formular-hinweis" class="hinweis" hidden></p>
+      <label>Name * <input name="titel" maxlength="200" required autocomplete="off"></label>
+      <div class="zeile">
+        <label>Portionen <input name="portionen" type="number" inputmode="decimal" min="0" max="999" step="any"></label>
+        <label>Kategorien <input name="kategorien" maxlength="200" autocomplete="off" placeholder="z. B. Hauptspeise, Pasta"></label>
+      </div>
+      <div class="zeile drei">
+        <label>Arbeitszeit (Min.) <input name="arbeitszeit" type="number" inputmode="numeric" min="0" max="99999"></label>
+        <label>Koch-/Backzeit (Min.) <input name="kochzeit" type="number" inputmode="numeric" min="0" max="99999"></label>
+        <label>Gesamt (Min.) <input name="gesamtzeit" type="number" inputmode="numeric" min="0" max="99999"></label>
+      </div>
+      <label>Zutaten <span class="klein">– eine pro Zeile, Überschriften mit # davor</span>
+        <textarea name="zutaten" rows="8" placeholder="500 g Mehl&#10;1 Pck. Trockenhefe&#10;# Für die Soße&#10;1 Dose Tomaten"></textarea>
+      </label>
+      <label>Zubereitung <span class="klein">– Schritte durch eine Leerzeile trennen</span>
+        <textarea name="schritte" rows="10"></textarea>
+      </label>
+      <label>Beschreibung <textarea name="beschreibung" rows="2" maxlength="2000"></textarea></label>
+      <label>Eigene Notizen <textarea name="notizen" rows="3" maxlength="5000" placeholder="z. B. weniger Zucker nehmen"></textarea></label>
+      <div class="foto-feld">
+        <span class="feld-titel">Eigenes Foto</span>
+        <div id="foto-vorschau" class="foto-vorschau" hidden></div>
+        <div class="foto-knoepfe">
+          <button id="foto-waehlen" type="button">📷 Foto aufnehmen oder wählen</button>
+          <button id="foto-entfernen" class="gefahr" type="button" hidden>Entfernen</button>
+        </div>
+        <input id="foto-datei" type="file" accept="image/*" hidden>
+      </div>
+      <label>Bildadresse <span class="klein">– wird angezeigt, wenn es kein eigenes Foto gibt</span>
+        <input name="bild" type="url" maxlength="1000" autocomplete="off" placeholder="https://…">
+      </label>
+      <label>Link zum Original <input name="quelle" type="url" maxlength="1000" autocomplete="off" placeholder="https://…"></label>
+      <p class="fehler" hidden></p>
+      <div class="knoepfe">
+        <span class="platz"></span>
+        <button type="button" data-schliessen>Abbrechen</button>
+        <button class="haupt" type="submit">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Zutaten auf die Einkaufsliste -->
+  <dialog id="dlg-einkaufen">
+    <form id="form-einkaufen" novalidate>
+      <h2>Auf die Einkaufsliste</h2>
+      <p id="einkaufen-hinweis" class="hinweis"></p>
+      <button id="einkaufen-alle" class="text-knopf" type="button">Keine auswählen</button>
+      <div id="einkaufen-zutaten" class="auswahl"></div>
+      <div class="knoepfe">
+        <span class="platz"></span>
+        <button type="button" data-schliessen>Abbrechen</button>
+        <button id="einkaufen-ok" class="haupt" type="submit">Hinzufügen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-einstellungen">
+    <h2>Einstellungen</h2>
+    <h3>Gemeinsam nutzen</h3>
+    <div id="sync-aus">
+      <p class="hinweis">Über ein Google Sheet könnt ihr zu zweit dieselben Rezepte und dieselbe Einkaufsliste nutzen. Wie du das Sheet einrichtest, steht in der Anleitung. Hast du einen Einladungs-Link bekommen, tippe einfach darauf.</p>
+      <form id="form-sync" novalidate>
+        <label>Adresse der Web-App <input name="url" type="url" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec"></label>
+        <button class="haupt breit" type="submit">Verbinden</button>
+      </form>
+    </div>
+    <div id="sync-an" hidden>
+      <p id="sync-info" class="hinweis"></p>
+      <div class="knoepfe">
+        <button id="sync-einladen" type="button">📨 Einladungs-Link teilen</button>
+        <button id="sync-jetzt" type="button">Jetzt abgleichen</button>
+        <button id="sync-trennen" class="gefahr" type="button">Trennen</button>
+      </div>
+      <p class="hinweis klein-abstand">Wer den Einladungs-Link hat, kann eure Rezepte lesen und ändern. Schick ihn nur an die Person, mit der du teilen möchtest.</p>
+    </div>
+    <hr>
+    <h3>Sicherung</h3>
+    <p id="sicherung-hinweis" class="hinweis">Deine Rezepte sind nur auf diesem Handy gespeichert. Mit einer Sicherungsdatei kannst du sie aufbewahren oder auf ein anderes Handy übertragen.</p>
+    <div class="knoepfe">
+      <button id="exportieren" type="button">Daten exportieren</button>
+      <button id="importieren" type="button">Daten importieren</button>
+    </div>
+    <input id="import-datei" type="file" accept=".json,application/json" hidden>
+    <hr>
+    <h3>Rezepte laden</h3>
+    <p class="hinweis">Die App lädt die Rezeptseite zuerst direkt. Klappt das nicht, geht die Adresse über einen öffentlichen Umweg (r.jina.ai, allorigins.win, codetabs.com).</p>
+    <label>Eigener Umweg (optional) <input id="proxy" type="url" autocomplete="off" placeholder="https://…/?url={url}"></label>
+    <hr>
+    <div class="knoepfe">
+      <span class="platz"></span>
+      <button class="haupt" type="button" data-schliessen>Schließen</button>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
