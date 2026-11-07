@@ -1098,14 +1098,29 @@ function sammlungsBild(sammlung) {
   return '<div class="bild" aria-hidden="true">📁</div>';
 }
 
+// Ob der Sammlungsbereich aufgeklappt ist, merkt sich nur dieses Handy.
+const SAMMLUNGEN_OFFEN = 'rezepte-sammlungen-offen';
+function sammlungenOffen() {
+  try { return localStorage.getItem(SAMMLUNGEN_OFFEN) === '1'; } catch { return false; }
+}
+function setzeSammlungenOffen(offen) {
+  try { localStorage.setItem(SAMMLUNGEN_OFFEN, offen ? '1' : '0'); } catch { /* egal */ }
+}
+
 function zeichneSammlungen() {
   const bereich = $('#sammlungen');
   const zeigen = daten.rezepte.length > 0 && !$('#suche').value.trim() && filter === 'alle';
   bereich.hidden = !zeigen;
   if (!zeigen) return;
   const liste = alleSammlungen();
-  bereich.innerHTML = `<h2 class="abschnitt-titel">Sammlungen</h2>
-    <div class="sammlung-reihe">
+  // Ab drei Karten (mit „Neue Sammlung“) passt nicht mehr alles in die Reihe.
+  const umschaltbar = liste.length >= 2;
+  const offen = umschaltbar && sammlungenOffen();
+  bereich.innerHTML = `<div class="abschnitt-kopf">
+      <h2 class="abschnitt-titel">Sammlungen</h2>
+      ${umschaltbar ? `<button type="button" class="text-knopf" data-aktion="sammlungen-umschalten" aria-expanded="${offen}">${offen ? 'Weniger anzeigen' : `Alle anzeigen (${liste.length})`}</button>` : ''}
+    </div>
+    <div class="sammlung-reihe${offen ? ' offen' : ''}">
       ${liste.map((s) => `<button type="button" class="sammlung-karte" data-sammlung="${esc(s.name)}">
         ${sammlungsBild(s)}
         <span class="karte-text"><span class="karte-titel">${esc(s.name)}</span><span class="karte-meta">${s.rezepte.length} ${s.rezepte.length === 1 ? 'Rezept' : 'Rezepte'}</span></span>
@@ -2172,6 +2187,12 @@ $('#sammlungen').addEventListener('click', (e) => {
   const karte = e.target.closest('[data-sammlung]');
   if (karte) zeigeSammlung(karte.dataset.sammlung);
   else if (e.target.closest('[data-aktion="neue-sammlung"]')) oeffneSammlungsDialog('');
+  else if (e.target.closest('[data-aktion="sammlungen-umschalten"]')) {
+    const offen = !sammlungenOffen();
+    setzeSammlungenOffen(offen);
+    zeichneSammlungen();
+    if (!offen) $('#sammlungen').scrollIntoView({ block: 'nearest' });
+  }
 });
 $('#suche').addEventListener('input', zeichneListe);
 $('#sortierung').addEventListener('change', zeichneListe);

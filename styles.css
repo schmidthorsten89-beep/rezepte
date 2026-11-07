@@ -298,6 +298,20 @@ main {
   scrollbar-width: none;
 }
 
+.abschnitt-kopf { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.abschnitt-kopf .abschnitt-titel { margin: 0; }
+
+/* Aufgeklappt: alle Sammlungen als Raster statt als Wischreihe */
+.sammlung-reihe.offen {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  margin: 0;
+  padding: 0 0 4px;
+  overflow: visible;
+}
+.sammlung-reihe.offen .sammlung-karte { width: auto; }
+.sammlung-reihe.offen .sammlung-karte .karte-titel { -webkit-line-clamp: 2; }
+
 .sammlung-karte {
   position: relative;
   display: flex;
