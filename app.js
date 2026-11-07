@@ -57,6 +57,16 @@ function rezeptMitId(id) {
 /* ================= Gemeinsam nutzen über Google Sheets ================= */
 
 const SKRIPT_RE = /^https:\/\/script\.google\.com\/(?:a\/macros\/[^/\s]+|macros)\/s\/[\w-]+\/exec$/;
+// Version von apps-script/Code.gs, die alles kann, was diese App ins Sheet schreibt.
+const SKRIPT_VERSION = 4;
+let veraltetGemeldet = false;
+
+function veraltetHinweis(antwort) {
+  const v = Number(antwort && antwort.version) || 1;
+  return v < SKRIPT_VERSION
+    ? 'Im Google Sheet läuft noch ein altes Script. Sammlungen, Fotos und Wochenplan bleiben bis zum Update nur auf diesem Handy. Bitte die neue Code.gs einspielen (Anleitung: „Script ändern“).'
+    : '';
+}
 
 function verbunden() {
   return Boolean(daten.einstellungen.sync && daten.einstellungen.sync.url && daten.einstellungen.sync.schluessel);
@@ -150,7 +160,13 @@ function uebernimmStand(antwort, gesendet) {
     for (const e of Object.values(offen)) stand.set(e.id, e);
     const liste = [...stand.values()].filter((e) => !e.geloescht);
     if (art === 'rezepte') {
-      daten.rezepte = liste.map((r) => ({ ...neuesRezept({}), ...r, zutaten: alsListe(r.zutaten), schritte: alsListe(r.schritte), kategorien: alsListe(r.kategorien), sammlungen: alsListe(r.sammlungen) }));
+      // Felder, die das Script nicht mitschickt (ältere Version ohne z. B. Sammlungen oder Fotos),
+      // behalten ihren Wert vom Handy, statt geleert zu werden.
+      const lokal = new Map(daten.rezepte.map((r) => [r.id, r]));
+      daten.rezepte = liste.map((r) => {
+        const m = { ...neuesRezept({}), ...(lokal.get(String(r.id)) || {}), ...r };
+        return { ...m, zutaten: alsListe(m.zutaten), schritte: alsListe(m.schritte), kategorien: alsListe(m.kategorien), sammlungen: alsListe(m.sammlungen) };
+      });
     } else if (art === 'einkauf') {
       daten.einkauf = liste.map((p) => ({ id: p.id, text: String(p.text || ''), erledigt: Boolean(p.erledigt), rezept: p.rezept || '', geaendert: p.geaendert || 0 }));
     } else {
@@ -191,11 +207,25 @@ async function gleicheAb({ laut = false, aktion = 'abgleich' } = {}) {
       const vorher = JSON.stringify([daten.rezepte, daten.einkauf, daten.plan]);
       uebernimmStand(antwort, gesendet);
       sync.zuletzt = Date.now();
-      sync.fehler = fotoFehler;
+      const veraltet = veraltetHinweis(antwort);
+      sync.fehler = fotoFehler || veraltet;
+      // Script wurde aktualisiert: Was das alte nicht speichern konnte (Sammlungen, Fotos), einmal nachschicken.
+      const alteVersion = Number(sync.version) || 0;
+      sync.version = Number(antwort.version) || 1;
+      if (alteVersion < SKRIPT_VERSION && sync.version >= SKRIPT_VERSION) {
+        for (const r of daten.rezepte) {
+          if (!daten.ausstehend.rezepte[r.id]) daten.ausstehend.rezepte[r.id] = JSON.parse(JSON.stringify(r));
+        }
+        abgleichNochmal = true;
+      }
       speichere();
       if (JSON.stringify([daten.rezepte, daten.einkauf, daten.plan]) !== vorher) zeichneNachAbgleich();
-      setzeSyncAnzeige(fotoFehler ? 'fehler' : 'ok');
+      setzeSyncAnzeige(sync.fehler ? 'fehler' : 'ok');
       if (fotoFehler) zeigeStatus(fotoFehler, 7000);
+      else if (veraltet && (laut || !veraltetGemeldet)) {
+        veraltetGemeldet = true;
+        zeigeStatus(veraltet, 9000);
+      }
       else if (laut) zeigeStatus('Mit dem Google Sheet abgeglichen.');
       raeumeFotosAuf();
       holeFehlendeFotos();
@@ -250,8 +280,11 @@ async function verbinde(url, schluessel) {
   daten.ausstehend = ausstehend;
   uebernimmStand(antwort, gesendet);
   zugang.zuletzt = Date.now();
+  zugang.version = Number(antwort.version) || 1;
+  zugang.fehler = veraltetHinweis(antwort);
   speichere();
-  setzeSyncAnzeige('ok');
+  setzeSyncAnzeige(zugang.fehler ? 'fehler' : 'ok');
+  if (zugang.fehler) setTimeout(() => zeigeStatus(zugang.fehler, 9000), 5500);
   zeichneNachAbgleich();
   if (gesendet.rezepte.length < Object.keys(ausstehend.rezepte).length) planeAbgleich(300);
   else holeFehlendeFotos();
