@@ -1,7 +1,7 @@
 'use strict';
 
 // Bei jeder Änderung an den App-Dateien erhöhen, damit die Handys die neue Version laden.
-const CACHE = 'rezepte-v4';
+const CACHE = 'rezepte-v6';
 // Rezeptbilder bleiben über App-Updates hinweg erhalten, damit sie auch offline da sind.
 const BILDER_CACHE = 'rezepte-bilder';
 // Eigene Fotos verwaltet app.js; dieser Speicher darf bei Updates nie gelöscht werden.

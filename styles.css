@@ -168,7 +168,7 @@ main {
   left: 0;
   z-index: 2;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   padding-bottom: env(safe-area-inset-bottom);
   background: var(--flaeche);
   border-top: 1px solid var(--rand);
@@ -284,6 +284,61 @@ main {
 
 .karte-meta { margin-top: auto; color: var(--leise); font-size: 13px; }
 
+/* ---------- Sammlungen ---------- */
+
+.sammlungen { margin-top: 14px; }
+.abschnitt-titel { margin: 0 0 8px; font-size: 16px; }
+
+.sammlung-reihe {
+  display: flex;
+  gap: 10px;
+  margin: 0 -16px;
+  padding: 0 16px 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sammlung-karte {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 132px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--flaeche);
+  border: 1px solid var(--rand);
+  border-radius: 12px;
+  text-align: left;
+}
+
+.sammlung-karte .bild, .sammlung-karte .mosaik { aspect-ratio: 1; font-size: 36px; }
+.sammlung-karte .karte-text { gap: 2px; padding: 6px 9px 8px; }
+.sammlung-karte .karte-titel { font-size: 14px; -webkit-line-clamp: 1; }
+.sammlung-karte .karte-meta { font-size: 12px; }
+
+.mosaik { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 1px; overflow: hidden; background: var(--rand); }
+.mosaik .bild { aspect-ratio: auto; height: 100%; font-size: 18px; }
+
+.sammlung-neu { border-style: dashed; }
+.sammlung-neu .bild { background: transparent; color: var(--marke); font-size: 40px; }
+.sammlung-neu .karte-titel { color: var(--marke); }
+
+.rezept-sammlungen { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sammlung-link {
+  min-height: 32px;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--marke);
+  border-radius: 999px;
+  color: var(--marke);
+  font-size: 13px;
+}
+
+#sammlung-suche { margin-bottom: 4px; }
+.auswahl small { display: block; margin-top: 2px; color: var(--leise); font-size: 12px; }
+.feld-titel span { font-weight: 400; }
+
 .karte-herz {
   position: absolute;
   top: 6px;
@@ -338,7 +393,7 @@ main {
 .fakten li { padding: 4px 10px; background: var(--marke-zart); border-radius: 999px; font-size: 13px; }
 .fakten .kategorie { background: transparent; border: 1px solid var(--rand); color: var(--leise); }
 
-.aktionen { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 14px 16px 4px; }
+.aktionen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 14px 16px 4px; }
 .aktionen button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px; font-size: 12px; }
 .aktionen button span { font-size: 20px; line-height: 1.2; }
 .aktionen .an { background: var(--marke-zart); border-color: var(--marke); color: var(--marke); font-weight: 600; }
@@ -475,7 +530,7 @@ dialog hr { margin: 16px 0; border: 0; border-top: 1px solid var(--rand); }
 .knoepfe { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
 
 /* Knöpfe langer Dialoge bleiben beim Scrollen sichtbar. */
-#dlg-formular .knoepfe, #dlg-einkaufen .knoepfe {
+#dlg-formular .knoepfe, #dlg-einkaufen .knoepfe, #dlg-sammlung .knoepfe, #dlg-planen .knoepfe {
   position: sticky;
   bottom: -16px;
   z-index: 1;
@@ -531,3 +586,58 @@ dialog hr { margin: 16px 0; border: 0; border-top: 1px solid var(--rand); }
 @media (prefers-reduced-motion: reduce) {
   .laedt::before, #sync.laeuft { animation: none; }
 }
+
+/* ---------- Wochenplan ---------- */
+
+.woche-kopf { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.woche-kopf > button { flex: none; width: 44px; padding: 0; font-size: 26px; line-height: 1; }
+.woche-titel { display: flex; flex: 1; flex-direction: column; align-items: center; min-width: 0; text-align: center; }
+.woche-titel strong { font-size: 17px; }
+.woche-titel .text-knopf { min-height: 28px; padding: 0; font-size: 13px; }
+
+.tag {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  background: var(--flaeche);
+  border: 1px solid var(--rand);
+  border-radius: 12px;
+}
+
+.tag.heute { border-color: var(--marke); box-shadow: inset 4px 0 0 var(--marke); }
+.tag.vorbei { opacity: .7; }
+.tag-kopf { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tag-name { font-weight: 700; }
+.tag-name small { margin-left: 6px; color: var(--marke); font-size: 12px; font-weight: 600; text-transform: uppercase; }
+.tag-kopf button { min-height: 36px; padding: 4px 12px; border-radius: 999px; font-size: 14px; }
+
+.plan-eintraege { margin: 8px 0 0; padding: 0; list-style: none; }
+.plan-eintrag { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--rand); }
+.plan-eintrag:first-child { border-top: 0; }
+
+.plan-rezept {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  background: none;
+  border: 0;
+  text-align: left;
+}
+
+.plan-rezept .bild, .planen-liste .bild { flex: none; width: 44px; height: 44px; border-radius: 8px; font-size: 22px; }
+.plan-text { display: flex; flex-direction: column; min-width: 0; }
+.plan-text span { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.plan-text small { color: var(--leise); font-size: 12px; }
+.plan-frei { flex: 1; min-width: 0; padding: 10px 0; color: var(--leise); font-style: italic; }
+.plan-weg { flex: none; width: 40px; min-height: 40px; padding: 0; background: none; border: 0; color: var(--leise); font-size: 18px; }
+
+.planen-liste label { align-items: center; }
+.planen-liste .geplant { color: var(--marke); }
+#dlg-planen .chips { margin: 10px -16px 4px; }
+
+.tag-liste { display: flex; flex-direction: column; gap: 6px; }
+.tag-liste button { display: flex; justify-content: space-between; gap: 8px; text-align: left; }
+.tag-liste small { color: var(--leise); }

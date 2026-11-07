@@ -9,9 +9,10 @@ function leereDaten() {
     version: 1,
     rezepte: [],
     einkauf: [],
+    plan: [],   // Wochenplan: { id, datum: 'JJJJ-MM-TT', rezept: Rezept-ID oder '', name, geaendert }
     einstellungen: { proxy: '', sync: null },
     // Lokale Änderungen, die noch nicht im Google Sheet angekommen sind (nach Art und ID).
-    ausstehend: { rezepte: {}, einkauf: {} },
+    ausstehend: { rezepte: {}, einkauf: {}, plan: {} },
   };
 }
 
@@ -24,6 +25,7 @@ function ladeDaten() {
         ...leer,
         ...d,
         einkauf: Array.isArray(d.einkauf) ? d.einkauf : [],
+        plan: Array.isArray(d.plan) ? d.plan : [],
         einstellungen: { ...leer.einstellungen, ...(d.einstellungen || {}) },
         ausstehend: { ...leer.ausstehend, ...(d.ausstehend || {}) },
       };
@@ -136,7 +138,9 @@ function setzeSyncAnzeige(zustand) {
 
 // Nimmt den Stand aus dem Sheet und legt die noch nicht übertragenen eigenen Änderungen darüber.
 function uebernimmStand(antwort, gesendet) {
-  for (const art of ['rezepte', 'einkauf']) {
+  for (const art of ['rezepte', 'einkauf', 'plan']) {
+    // Ein älteres Script kennt z. B. den Wochenplan noch nicht: dann bleibt er hier und wartet.
+    if (!Array.isArray(antwort[art])) continue;
     const offen = daten.ausstehend[art];
     for (const e of gesendet[art]) {
       if (offen[e.id] && offen[e.id].geaendert === e.geaendert) delete offen[e.id];
@@ -145,9 +149,14 @@ function uebernimmStand(antwort, gesendet) {
     for (const e of Array.isArray(antwort[art]) ? antwort[art] : []) if (e && e.id) stand.set(String(e.id), e);
     for (const e of Object.values(offen)) stand.set(e.id, e);
     const liste = [...stand.values()].filter((e) => !e.geloescht);
-    daten[art] = art === 'rezepte'
-      ? liste.map((r) => ({ ...neuesRezept({}), ...r, zutaten: alsListe(r.zutaten), schritte: alsListe(r.schritte), kategorien: alsListe(r.kategorien) }))
-      : liste.map((p) => ({ id: p.id, text: String(p.text || ''), erledigt: Boolean(p.erledigt), rezept: p.rezept || '', geaendert: p.geaendert || 0 }));
+    if (art === 'rezepte') {
+      daten.rezepte = liste.map((r) => ({ ...neuesRezept({}), ...r, zutaten: alsListe(r.zutaten), schritte: alsListe(r.schritte), kategorien: alsListe(r.kategorien), sammlungen: alsListe(r.sammlungen) }));
+    } else if (art === 'einkauf') {
+      daten.einkauf = liste.map((p) => ({ id: p.id, text: String(p.text || ''), erledigt: Boolean(p.erledigt), rezept: p.rezept || '', geaendert: p.geaendert || 0 }));
+    } else {
+      daten.plan = liste.filter((p) => ISO_TAG.test(p.datum || ''))
+        .map((p) => ({ id: p.id, datum: p.datum, rezept: p.rezept || '', name: String(p.name || ''), geaendert: p.geaendert || 0 }));
+    }
   }
 }
 
@@ -175,15 +184,16 @@ async function gleicheAb({ laut = false, aktion = 'abgleich' } = {}) {
       const gesendet = {
         rezepte: Object.values(daten.ausstehend.rezepte).filter((e) => !istLokalesFoto(e.foto)),
         einkauf: Object.values(daten.ausstehend.einkauf),
+        plan: Object.values(daten.ausstehend.plan),
       };
       const antwort = await rufeSkript({ aktion, ...gesendet });
       if (daten.einstellungen.sync !== sync) return false;   // inzwischen getrennt
-      const vorher = JSON.stringify([daten.rezepte, daten.einkauf]);
+      const vorher = JSON.stringify([daten.rezepte, daten.einkauf, daten.plan]);
       uebernimmStand(antwort, gesendet);
       sync.zuletzt = Date.now();
       sync.fehler = fotoFehler;
       speichere();
-      if (JSON.stringify([daten.rezepte, daten.einkauf]) !== vorher) zeichneNachAbgleich();
+      if (JSON.stringify([daten.rezepte, daten.einkauf, daten.plan]) !== vorher) zeichneNachAbgleich();
       setzeSyncAnzeige(fotoFehler ? 'fehler' : 'ok');
       if (fotoFehler) zeigeStatus(fotoFehler, 7000);
       else if (laut) zeigeStatus('Mit dem Google Sheet abgeglichen.');
@@ -212,7 +222,9 @@ async function gleicheAb({ laut = false, aktion = 'abgleich' } = {}) {
 function zeichneNachAbgleich() {
   aktualisiereEinkaufZahl();
   if (ansicht === 'liste') zeichneListe();
+  else if (ansicht === 'sammlung') zeichneSammlung();
   else if (ansicht === 'einkauf') zeichneEinkauf();
+  else if (ansicht === 'plan') zeichnePlan();
   else if (ansicht === 'rezept') {
     if (offenesRezept && rezeptMitId(offenesRezept.id)) zeichneRezept();
     else zeigeAnsicht('liste');
@@ -223,11 +235,16 @@ function zeichneNachAbgleich() {
 async function verbinde(url, schluessel) {
   const zugang = { url, schluessel: schluessel || zufallsSchluessel(), zuletzt: 0, fehler: '' };
   // Alles, was schon auf diesem Handy ist, kommt ins Sheet.
-  const ausstehend = { rezepte: {}, einkauf: {} };
+  const ausstehend = { rezepte: {}, einkauf: {}, plan: {} };
   for (const r of daten.rezepte) ausstehend.rezepte[r.id] = { ...r, geaendert: r.geaendert || Date.now() };
   for (const p of daten.einkauf) ausstehend.einkauf[p.id] = { ...p, geaendert: p.geaendert || Date.now() };
+  for (const p of daten.plan) ausstehend.plan[p.id] = { ...p, geaendert: p.geaendert || Date.now() };
   // Rezepte mit neuem Foto folgen gleich danach, wenn der Schlüssel im Script steht und das Foto hochgeladen ist.
-  const gesendet = { rezepte: Object.values(ausstehend.rezepte).filter((e) => !istLokalesFoto(e.foto)), einkauf: Object.values(ausstehend.einkauf) };
+  const gesendet = {
+    rezepte: Object.values(ausstehend.rezepte).filter((e) => !istLokalesFoto(e.foto)),
+    einkauf: Object.values(ausstehend.einkauf),
+    plan: Object.values(ausstehend.plan),
+  };
   const antwort = await rufeSkript({ aktion: 'einrichten', ...gesendet }, zugang);
   daten.einstellungen.sync = zugang;
   daten.ausstehend = ausstehend;
@@ -243,7 +260,7 @@ async function verbinde(url, schluessel) {
 
 function trenne() {
   daten.einstellungen.sync = null;
-  daten.ausstehend = { rezepte: {}, einkauf: {} };
+  daten.ausstehend = { rezepte: {}, einkauf: {}, plan: {} };
   speichere();
   setzeSyncAnzeige();
 }
@@ -981,16 +998,109 @@ let kochmodus = false;
 
 function zeigeAnsicht(name) {
   ansicht = name;
+  const unterseite = name === 'rezept' || name === 'sammlung';
   for (const s of document.querySelectorAll('.ansicht')) s.hidden = s.id !== `ansicht-${name}`;
-  for (const b of document.querySelectorAll('.navi button')) b.classList.toggle('aktiv', b.dataset.ansicht === (name === 'rezept' ? 'liste' : name));
-  $('#neu').hidden = name !== 'liste';
-  $('#zurueck').hidden = name !== 'rezept';
-  $('#bearbeiten').hidden = name !== 'rezept';
-  $('#titel').textContent = name === 'einkauf' ? 'Einkaufsliste' : name === 'rezept' ? 'Rezept' : 'Rezepte';
+  for (const b of document.querySelectorAll('.navi button')) b.classList.toggle('aktiv', b.dataset.ansicht === (unterseite ? 'liste' : name));
+  $('#neu').hidden = name !== 'liste' && name !== 'sammlung';
+  $('#zurueck').hidden = !unterseite;
+  $('#bearbeiten').hidden = !unterseite;
+  $('#bearbeiten').setAttribute('aria-label', name === 'sammlung' ? 'Sammlung bearbeiten' : 'Rezept bearbeiten');
+  $('#titel').textContent = name === 'einkauf' ? 'Einkaufsliste' : name === 'plan' ? 'Wochenplan' : name === 'rezept' ? 'Rezept' : name === 'sammlung' ? `📁 ${offeneSammlung}` : 'Rezepte';
   if (name !== 'rezept') beendeKochmodus();
   window.scrollTo(0, 0);
   if (name === 'liste') zeichneListe();
+  if (name === 'sammlung') zeichneSammlung();
   if (name === 'einkauf') zeichneEinkauf();
+  if (name === 'plan') zeichnePlan();
+}
+
+/* ---------- Sammlungen ---------- */
+
+// Eine Sammlung gibt es, solange mindestens ein Rezept in ihr steckt. Die Namen stehen am Rezept,
+// so kommen sich zwei Handys beim Einsortieren verschiedener Rezepte nicht in die Quere.
+let offeneSammlung = '';
+let rueckAnsicht = 'liste';   // wohin „Zurück“ aus einem Rezept führt
+let importZiel = '';   // Sammlung, in die ein neues Rezept gleich einsortiert wird
+
+function sammlungsName(text) {
+  return String(text || '').replace(/[,\n\r]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+}
+
+function gleicherName(a, b) {
+  return a.toLocaleLowerCase('de') === b.toLocaleLowerCase('de');
+}
+
+function inSammlung(r, name) {
+  return (r.sammlungen || []).some((s) => gleicherName(s, name));
+}
+
+function alleSammlungen() {
+  const nachName = new Map();
+  for (const r of daten.rezepte) {
+    for (const s of r.sammlungen || []) {
+      const schluessel = s.toLocaleLowerCase('de');
+      if (!nachName.has(schluessel)) nachName.set(schluessel, { name: s, rezepte: [] });
+      nachName.get(schluessel).rezepte.push(r);
+    }
+  }
+  return [...nachName.values()].sort((a, b) => a.name.localeCompare(b.name, 'de'));
+}
+
+function sammlungsRezepte(name) {
+  return daten.rezepte.filter((r) => inSammlung(r, name)).sort((a, b) => a.titel.localeCompare(b.titel, 'de'));
+}
+
+// Ordnet ein Rezept ein oder aus (alt = bisheriger Name beim Umbenennen). Liefert true bei einer Änderung.
+function setzeSammlung(r, name, drin, alt = name) {
+  const vorher = JSON.stringify(r.sammlungen || []);
+  const rest = (r.sammlungen || []).filter((s) => !gleicherName(s, name) && !gleicherName(s, alt));
+  r.sammlungen = drin ? [...rest, name] : rest;
+  return JSON.stringify(r.sammlungen) !== vorher;
+}
+
+function sammlungsBild(sammlung) {
+  const mitBild = sammlung.rezepte.filter((r) => r.foto || r.bild).sort((a, b) => b.erstellt - a.erstellt);
+  if (mitBild.length >= 4) return `<div class="mosaik">${mitBild.slice(0, 4).map((r) => bildHtml(r)).join('')}</div>`;
+  if (mitBild.length) return bildHtml(mitBild[0]);
+  return '<div class="bild" aria-hidden="true">📁</div>';
+}
+
+function zeichneSammlungen() {
+  const bereich = $('#sammlungen');
+  const zeigen = daten.rezepte.length > 0 && !$('#suche').value.trim() && filter === 'alle';
+  bereich.hidden = !zeigen;
+  if (!zeigen) return;
+  const liste = alleSammlungen();
+  bereich.innerHTML = `<h2 class="abschnitt-titel">Sammlungen</h2>
+    <div class="sammlung-reihe">
+      ${liste.map((s) => `<button type="button" class="sammlung-karte" data-sammlung="${esc(s.name)}">
+        ${sammlungsBild(s)}
+        <span class="karte-text"><span class="karte-titel">${esc(s.name)}</span><span class="karte-meta">${s.rezepte.length} ${s.rezepte.length === 1 ? 'Rezept' : 'Rezepte'}</span></span>
+      </button>`).join('')}
+      <button type="button" class="sammlung-karte sammlung-neu" data-aktion="neue-sammlung">
+        <span class="bild" aria-hidden="true">＋</span>
+        <span class="karte-text"><span class="karte-titel">Neue Sammlung</span><span class="karte-meta">${liste.length ? 'anlegen' : 'z. B. Weihnachten'}</span></span>
+      </button>
+    </div>`;
+  fuelleFotos(bereich);
+}
+
+function zeigeSammlung(name, verlauf = true) {
+  const echt = alleSammlungen().find((s) => gleicherName(s.name, name));
+  if (!echt) { zeigeAnsicht('liste'); return; }
+  offeneSammlung = echt.name;
+  if (verlauf) history.pushState({ sammlung: echt.name }, '');
+  zeigeAnsicht('sammlung');
+}
+
+function zeichneSammlung() {
+  const liste = sammlungsRezepte(offeneSammlung);
+  // Leer geworden (z. B. vom anderen Handy aufgelöst)
+  if (!liste.length) { zeigeAnsicht('liste'); return; }
+  $('#titel').textContent = `📁 ${offeneSammlung}`;
+  $('#sammlung-anzahl').textContent = `${liste.length} ${liste.length === 1 ? 'Rezept' : 'Rezepte'}`;
+  $('#sammlung-liste').innerHTML = liste.map(karteHtml).join('');
+  fuelleFotos($('#sammlung-liste'));
 }
 
 // Eigenes Foto vor Bild von der Rezeptseite; fuelleFotos() setzt noch nicht geladene Fotos ein.
@@ -1005,7 +1115,7 @@ function bildHtml(r, klasse = '') {
 }
 
 function passtZurSuche(r, begriffe) {
-  const heu = [r.titel, ...(r.zutaten || []), ...(r.kategorien || [])].join(' ').toLowerCase();
+  const heu = [r.titel, ...(r.zutaten || []), ...(r.kategorien || []), ...(r.sammlungen || [])].join(' ').toLowerCase();
   return begriffe.every((b) => heu.includes(b));
 }
 
@@ -1025,6 +1135,7 @@ function zeichneFilter() {
 
 function zeichneListe() {
   zeichneFilter();
+  zeichneSammlungen();
   const begriffe = $('#suche').value.toLowerCase().split(/\s+/).filter(Boolean);
   let liste = daten.rezepte.filter((r) => {
     if (filter === 'favoriten' && !r.favorit) return false;
@@ -1049,16 +1160,18 @@ function zeichneListe() {
     $('#liste').innerHTML = '<p class="leer" style="grid-column: 1 / -1">Nichts gefunden.</p>';
     return;
   }
-  $('#liste').innerHTML = liste.map((r) => {
-    const min = gesamtMinuten(r);
-    const meta = [min ? `⏱ ${zeitText(min)}` : '', r.zutaten.length ? `${r.zutaten.filter((z) => !istUeberschrift(z)).length} Zutaten` : ''].filter(Boolean).join(' · ');
-    return `<button type="button" class="karte" data-rezept="${esc(r.id)}">
+  $('#liste').innerHTML = liste.map(karteHtml).join('');
+  fuelleFotos($('#liste'));
+}
+
+function karteHtml(r) {
+  const min = gesamtMinuten(r);
+  const meta = [min ? `⏱ ${zeitText(min)}` : '', r.zutaten.length ? `${r.zutaten.filter((z) => !istUeberschrift(z)).length} Zutaten` : ''].filter(Boolean).join(' · ');
+  return `<button type="button" class="karte" data-rezept="${esc(r.id)}">
       ${bildHtml(r)}
       ${r.favorit ? '<span class="karte-herz" aria-label="Favorit">♥</span>' : ''}
       <span class="karte-text"><span class="karte-titel">${esc(r.titel)}</span><span class="karte-meta">${esc(meta)}</span></span>
     </button>`;
-  }).join('');
-  fuelleFotos($('#liste'));
 }
 
 /* ---------- Rezept-Detail ---------- */
@@ -1069,7 +1182,11 @@ function oeffneRezept(id, verlauf = true) {
   if (!offenesRezept || offenesRezept.id !== id) {
     offenesRezept = { id, portionen: r.portionen || null, faktor: 1, zutatenAus: new Set(), schritteAus: new Set() };
   }
-  if (verlauf) history.pushState({ rezept: id }, '');
+  if (verlauf) {
+    // Zurück führt in den Wochenplan, wenn das Rezept dort geöffnet wurde.
+    if (ansicht !== 'rezept') rueckAnsicht = ansicht === 'plan' ? 'plan' : 'liste';
+    history.pushState({ rezept: id }, '');
+  }
   zeigeAnsicht('rezept');
   zeichneRezept();
 }
@@ -1121,9 +1238,11 @@ function zeichneRezept() {
       <h2>${esc(r.titel)}</h2>
       ${quelle.length ? `<div class="quelle">${quelle.join('')}</div>` : ''}
       ${fakten.length || (r.kategorien || []).length ? `<ul class="fakten">${fakten.map((t) => `<li>${esc(t)}</li>`).join('')}${(r.kategorien || []).map((k) => `<li class="kategorie">${esc(k)}</li>`).join('')}</ul>` : ''}
+      ${(r.sammlungen || []).length ? `<div class="rezept-sammlungen">${r.sammlungen.map((s) => `<button type="button" class="sammlung-link" data-sammlung-link="${esc(s)}">📁 ${esc(s)}</button>`).join('')}</div>` : ''}
     </div>
     <div class="aktionen">
       <button type="button" data-aktion="favorit" class="${r.favorit ? 'an' : ''}" aria-pressed="${Boolean(r.favorit)}"><span aria-hidden="true">${r.favorit ? '♥' : '♡'}</span>Favorit</button>
+      <button type="button" data-aktion="sammlungen"><span aria-hidden="true">📁</span>Sammlung</button>
       <button type="button" data-aktion="einkaufen" ${r.zutaten.length ? '' : 'disabled'}><span aria-hidden="true">🛒</span>Einkaufsliste</button>
       <button type="button" data-aktion="kochmodus" class="${kochmodus ? 'an' : ''}" aria-pressed="${kochmodus}"><span aria-hidden="true">👩‍🍳</span>Kochmodus</button>
     </div>
@@ -1146,6 +1265,7 @@ function zeichneRezept() {
     ${r.notizen ? `<section class="block"><h3>Meine Notizen</h3><p class="notizen">${esc(r.notizen)}</p></section>` : ''}
     <div class="fuss">
       <button type="button" data-aktion="bearbeiten">✎ Bearbeiten</button>
+      <button type="button" data-aktion="planen">📅 Planen</button>
       ${r.quelle && navigator.share ? '<button type="button" data-aktion="teilen">📤 Teilen</button>' : ''}
       <span class="platz"></span>
       <button type="button" class="gefahr" data-aktion="loeschen">🗑 Löschen</button>
@@ -1271,6 +1391,8 @@ function oeffneImport(url = '') {
   const form = $('#form-import');
   form.url.value = url;
   importStatus('');
+  $('#import-ziel').hidden = !importZiel;
+  $('#import-ziel').textContent = importZiel ? `📁 Kommt in die Sammlung „${importZiel}“.` : '';
   $('#laden').disabled = false;
   oeffneDialog($('#dlg-import'));
   if (url) form.requestSubmit();
@@ -1308,8 +1430,14 @@ $('#form-import').addEventListener('submit', async (e) => {
   const vorhanden = daten.rezepte.find((r) => r.quelle === url);
   if (vorhanden) {
     $('#dlg-import').close();
+    // Aus einer Sammlung heraus geteilt: das vorhandene Rezept dort einsortieren.
+    const einsortiert = importZiel && setzeSammlung(vorhanden, importZiel, true);
+    if (einsortiert) {
+      merke('rezepte', vorhanden);
+      speichere();
+    }
     oeffneRezept(vorhanden.id);
-    zeigeStatus('Dieses Rezept hast du schon gespeichert.');
+    zeigeStatus(einsortiert ? `Schon gespeichert – jetzt auch in „${importZiel}“.` : 'Dieses Rezept hast du schon gespeichert.');
     return;
   }
 
@@ -1321,7 +1449,7 @@ $('#form-import').addEventListener('submit', async (e) => {
   try {
     const r = await importiereUrl(url, abbruch.signal, (text) => importStatus(text, 'laedt'));
     if (abbruch.signal.aborted) return;
-    const rezept = neuesRezept({ ...r, quelle: url });
+    const rezept = neuesRezept({ ...r, quelle: url, sammlungen: importZiel ? [importZiel] : [] });
     if (r.unvollstaendig) {
       $('#dlg-import').close();
       oeffneFormular(rezept, 'Auf der Seite wurden keine Zutaten gefunden. Bitte ergänze sie von Hand (z. B. per Kopieren und Einfügen).');
@@ -1345,7 +1473,7 @@ $('#form-import').addEventListener('submit', async (e) => {
 $('#manuell').addEventListener('click', () => {
   const url = absoluteUrl(urlAusText($('#form-import').url.value));
   $('#dlg-import').close();
-  oeffneFormular(neuesRezept({ quelle: url }));
+  oeffneFormular(neuesRezept({ quelle: url, sammlungen: importZiel ? [importZiel] : [] }));
 });
 
 function neuesRezept(werte) {
@@ -1363,6 +1491,7 @@ function neuesRezept(werte) {
     zutaten: [],
     schritte: [],
     kategorien: [],
+    sammlungen: [],
     kalorien: '',
     bewertung: null,
     notizen: '',
@@ -1548,16 +1677,26 @@ $('#form-rezept').addEventListener('submit', async (e) => {
 
 /* ---------- Zutaten auf die Einkaufsliste ---------- */
 
-function oeffneEinkaufen() {
-  const r = rezeptMitId(offenesRezept.id);
-  const f = faktor();
-  const hinweis = r.portionen ? `${r.titel} – für ${formatZahl(offenesRezept.portionen)} ${offenesRezept.portionen === 1 ? 'Portion' : 'Portionen'}` : r.titel;
+// Quellen: [{ rezept, faktor, titel? }] – ein Rezept aus der Detailansicht oder alle Gerichte einer Woche.
+let einkaufQuellen = [];
+
+function oeffneEinkaufen(quellen, hinweis) {
+  if (!quellen) {
+    const r = rezeptMitId(offenesRezept.id);
+    quellen = [{ rezept: r, faktor: faktor() }];
+    hinweis = r.portionen ? `${r.titel} – für ${formatZahl(offenesRezept.portionen)} ${offenesRezept.portionen === 1 ? 'Portion' : 'Portionen'}` : r.titel;
+  }
+  einkaufQuellen = quellen;
   $('#einkaufen-hinweis').textContent = hinweis;
-  $('#einkaufen-zutaten').innerHTML = r.zutaten.map((z, i) => istUeberschrift(z)
-    ? `<p class="gruppe-titel">${esc(ueberschriftText(z))}</p>`
-    : `<label><input type="checkbox" value="${i}" checked> <span>${esc(zutatText(z, f))}</span></label>`).join('');
+  $('#einkaufen-zutaten').innerHTML = quellen.map((q, nr) => {
+    const kopf = quellen.length > 1 ? `<p class="gruppe-titel einkauf-rezept">${esc(q.titel || q.rezept.titel)}</p>` : '';
+    return kopf + q.rezept.zutaten.map((z, i) => istUeberschrift(z)
+      ? `<p class="gruppe-titel">${esc(ueberschriftText(z))}</p>`
+      : `<label><input type="checkbox" value="${nr}:${i}" checked> <span>${esc(zutatText(z, q.faktor))}</span></label>`).join('');
+  }).join('');
   aktualisiereEinkaufenKnopf();
   oeffneDialog($('#dlg-einkaufen'));
+  $('#dlg-einkaufen').scrollTop = 0;
 }
 
 function aktualisiereEinkaufenKnopf() {
@@ -1578,11 +1717,11 @@ $('#einkaufen-alle').addEventListener('click', () => {
 
 $('#form-einkaufen').addEventListener('submit', (e) => {
   e.preventDefault();
-  const r = rezeptMitId(offenesRezept.id);
-  const f = faktor();
-  const neu = [...document.querySelectorAll('#einkaufen-zutaten input:checked')].map((b) => ({
-    id: neueId(), text: zutatText(r.zutaten[Number(b.value)], f), erledigt: false, rezept: r.titel,
-  }));
+  const neu = [...document.querySelectorAll('#einkaufen-zutaten input:checked')].map((b) => {
+    const [nr, i] = b.value.split(':').map(Number);
+    const q = einkaufQuellen[nr];
+    return { id: neueId(), text: zutatText(q.rezept.zutaten[i], q.faktor), erledigt: false, rezept: q.rezept.titel };
+  });
   daten.einkauf.push(...neu);
   neu.forEach((p) => merke('einkauf', p));
   speichere();
@@ -1591,27 +1730,416 @@ $('#form-einkaufen').addEventListener('submit', (e) => {
   zeigeStatus(`${neu.length} ${neu.length === 1 ? 'Zutat' : 'Zutaten'} auf der Einkaufsliste.`);
 });
 
+/* ---------- Wochenplan ---------- */
+
+const ISO_TAG = /^\d{4}-\d{2}-\d{2}$/;
+const WOCHENTAGE = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+let planWoche = montagVon(new Date());   // angezeigte Woche (Montag)
+let planTag = '';                         // Tag, für den gerade Gerichte ausgewählt werden
+let planFilter = 'alle';                  // zuletzt gewählter Filter im Auswahldialog (z. B. eine Sammlung)
+let planAuswahl = new Set();
+let tagRezept = null;                     // Rezept, das über „📅 Planen“ eingeplant wird
+
+function isoTag(d) {
+  const zwei = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${zwei(d.getMonth() + 1)}-${zwei(d.getDate())}`;
+}
+
+function ausIso(tag) {
+  const [j, m, t] = tag.split('-').map(Number);
+  return new Date(j, m - 1, t);
+}
+
+function plusTage(d, n) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+}
+
+function montagVon(d) {
+  return plusTage(d, -((d.getDay() + 6) % 7));
+}
+
+function heuteIso() {
+  return isoTag(new Date());
+}
+
+function tagText(tag, lang = true) {
+  const d = ausIso(tag);
+  const name = WOCHENTAGE[d.getDay()];
+  return `${lang ? name : name.slice(0, 2)}, ${d.getDate()}.${d.getMonth() + 1}.`;
+}
+
+function planRezept(p) {
+  if (p.rezept) return rezeptMitId(p.rezept) || null;
+  // Von Hand im Sheet eingetragen: über den Namen zuordnen.
+  return p.name ? daten.rezepte.find((r) => gleicherName(r.titel, p.name)) || null : null;
+}
+
+function eintraegeAm(tag) {
+  return daten.plan.filter((p) => p.datum === tag);
+}
+
+function zeichnePlan() {
+  const heute = heuteIso();
+  const tage = Array.from({ length: 7 }, (_, i) => isoTag(plusTage(planWoche, i)));
+  const ende = plusTage(planWoche, 6);
+  const monat = (d) => d.toLocaleDateString('de-DE', { month: 'short' }).replace('.', '');
+  $('#woche-titel').textContent = planWoche.getMonth() === ende.getMonth()
+    ? `${planWoche.getDate()}.–${ende.getDate()}. ${monat(ende)} ${ende.getFullYear()}`
+    : `${planWoche.getDate()}. ${monat(planWoche)} – ${ende.getDate()}. ${monat(ende)} ${ende.getFullYear()}`;
+  $('#woche-heute').hidden = tage.includes(heute);
+  $('#woche-tage').innerHTML = tage.map((tag) => {
+    const liste = eintraegeAm(tag).map((p) => {
+      const r = planRezept(p);
+      const weg = `<button type="button" class="plan-weg" data-plan-weg="${esc(p.id)}" aria-label="${esc(r ? r.titel : p.name)} entfernen">✕</button>`;
+      if (!r) return `<li class="plan-eintrag"><span class="plan-frei">${esc(p.name || 'Gelöschtes Rezept')}</span>${weg}</li>`;
+      const min = gesamtMinuten(r);
+      return `<li class="plan-eintrag">
+          <button type="button" class="plan-rezept" data-rezept="${esc(r.id)}">
+            ${bildHtml(r)}
+            <span class="plan-text"><span>${esc(r.titel)}</span>${min ? `<small>⏱ ${esc(zeitText(min))}</small>` : ''}</span>
+          </button>${weg}</li>`;
+    }).join('');
+    const klasse = tag === heute ? ' heute' : tag < heute ? ' vorbei' : '';
+    return `<section class="tag${klasse}" aria-label="${esc(tagText(tag))}">
+        <div class="tag-kopf">
+          <span class="tag-name">${esc(tagText(tag))}${tag === heute ? '<small>Heute</small>' : ''}</span>
+          <button type="button" data-plan-tag="${tag}">＋ Gericht</button>
+        </div>
+        ${liste ? `<ul class="plan-eintraege">${liste}</ul>` : ''}
+      </section>`;
+  }).join('');
+  fuelleFotos($('#woche-tage'));
+  const mitZutaten = tage.flatMap(eintraegeAm).some((p) => { const r = planRezept(p); return r && r.zutaten.length; });
+  $('#woche-einkaufen').disabled = !mitZutaten;
+}
+
+function neuerPlanEintrag(tag, rezept, name) {
+  const eintrag = { id: neueId(), datum: tag, rezept: rezept ? rezept.id : '', name: rezept ? rezept.titel : name };
+  daten.plan.push(eintrag);
+  merke('plan', eintrag);
+  return eintrag;
+}
+
+// Alte Wochen nach zwei Monaten wegräumen, damit Plan und Sheet nicht endlos wachsen.
+function raeumePlanAuf() {
+  const grenze = isoTag(plusTage(new Date(), -60));
+  const alt = daten.plan.filter((p) => p.datum < grenze);
+  if (!alt.length) return;
+  alt.forEach((p) => merkeGeloescht('plan', p.id));
+  daten.plan = daten.plan.filter((p) => p.datum >= grenze);
+  speichere();
+}
+
+/* Auswahl: mehrere Rezepte für einen Tag */
+
+function oeffnePlanen(tag) {
+  planTag = tag;
+  planAuswahl = new Set();
+  const form = $('#form-planen');
+  form.frei.value = '';
+  $('#planen-suche').value = '';
+  $('#planen-titel').textContent = `Gerichte für ${tagText(tag)}`;
+  if (planFilter.startsWith('s:') && !alleSammlungen().some((s) => s.name === planFilter.slice(2))) planFilter = 'alle';
+  if (planFilter === 'favoriten' && !daten.rezepte.some((r) => r.favorit)) planFilter = 'alle';
+  zeichnePlanenFilter();
+  zeichnePlanenListe();
+  oeffneDialog($('#dlg-planen'));
+  $('#dlg-planen').scrollTop = 0;
+}
+
+function zeichnePlanenFilter() {
+  const chips = [['alle', 'Alle']];
+  if (daten.rezepte.some((r) => r.favorit)) chips.push(['favoriten', '♥ Favoriten']);
+  for (const s of alleSammlungen()) chips.push([`s:${s.name}`, `📁 ${s.name}`]);
+  $('#planen-filter').hidden = chips.length < 2;
+  $('#planen-filter').innerHTML = chips.map(([wert, text]) =>
+    `<button type="button" data-filter="${esc(wert)}" class="${planFilter === wert ? 'aktiv' : ''}" aria-pressed="${planFilter === wert}">${esc(text)}</button>`).join('');
+}
+
+function zeichnePlanenListe() {
+  const begriffe = $('#planen-suche').value.toLowerCase().split(/\s+/).filter(Boolean);
+  const schonGeplant = new Set(eintraegeAm(planTag).map((p) => p.rezept));
+  const liste = daten.rezepte.filter((r) => {
+    if (planFilter === 'favoriten' && !r.favorit) return false;
+    if (planFilter.startsWith('s:') && !inSammlung(r, planFilter.slice(2))) return false;
+    return passtZurSuche(r, begriffe);
+  }).sort((a, b) => a.titel.localeCompare(b.titel, 'de'));
+  $('#planen-liste').innerHTML = liste.length ? liste.map((r) => {
+    const min = gesamtMinuten(r);
+    const info = [schonGeplant.has(r.id) ? '<span class="geplant">schon geplant</span>' : '', min ? `⏱ ${esc(zeitText(min))}` : ''].filter(Boolean).join(' · ');
+    return `<label>
+        <input type="checkbox" value="${esc(r.id)}" ${planAuswahl.has(r.id) ? 'checked' : ''}>
+        ${bildHtml(r)}
+        <span>${esc(r.titel)}${info ? `<small>${info}</small>` : ''}</span>
+      </label>`;
+  }).join('') : `<p class="hinweis">${daten.rezepte.length ? 'Nichts gefunden.' : 'Noch keine Rezepte gespeichert.'}</p>`;
+  fuelleFotos($('#planen-liste'));
+  zeigePlanenZahl();
+}
+
+function zeigePlanenZahl() {
+  const n = planAuswahl.size + ($('#form-planen').frei.value.trim() ? 1 : 0);
+  $('#planen-ok').textContent = n ? `Hinzufügen (${n})` : 'Hinzufügen';
+  $('#planen-ok').disabled = !n;
+}
+
+$('#planen-filter').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-filter]');
+  if (!b) return;
+  planFilter = b.dataset.filter;
+  zeichnePlanenFilter();
+  zeichnePlanenListe();
+});
+
+$('#planen-suche').addEventListener('input', zeichnePlanenListe);
+$('#form-planen').frei.addEventListener('input', zeigePlanenZahl);
+
+$('#planen-liste').addEventListener('change', (e) => {
+  const box = e.target.closest('input[type="checkbox"]');
+  if (!box) return;
+  if (box.checked) planAuswahl.add(box.value);
+  else planAuswahl.delete(box.value);
+  zeigePlanenZahl();
+});
+
+$('#form-planen').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const frei = e.target.frei.value.replace(/\s+/g, ' ').trim().slice(0, 100);
+  const rezepte = daten.rezepte.filter((r) => planAuswahl.has(r.id)).sort((a, b) => a.titel.localeCompare(b.titel, 'de'));
+  if (!rezepte.length && !frei) return;
+  rezepte.forEach((r) => neuerPlanEintrag(planTag, r));
+  if (frei) neuerPlanEintrag(planTag, null, frei);
+  speichere();
+  $('#dlg-planen').close();
+  zeichnePlan();
+});
+
+/* Ein Rezept aus der Detailansicht einplanen */
+
+function oeffneTagWahl(r) {
+  tagRezept = r;
+  $('#tag-hinweis').textContent = r.titel;
+  const heute = new Date();
+  $('#tag-liste').innerHTML = Array.from({ length: 14 }, (_, i) => isoTag(plusTage(heute, i))).map((tag, i) => {
+    const n = eintraegeAm(tag).length;
+    const zusatz = [i === 0 ? 'heute' : i === 1 ? 'morgen' : '', n ? `${n} geplant` : ''].filter(Boolean).join(' · ');
+    return `<button type="button" data-tag="${tag}"><span>${esc(tagText(tag))}</span><small>${esc(zusatz)}</small></button>`;
+  }).join('');
+  oeffneDialog($('#dlg-tag'));
+}
+
+$('#tag-liste').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tag]');
+  if (!b || !tagRezept) return;
+  neuerPlanEintrag(b.dataset.tag, tagRezept);
+  speichere();
+  $('#dlg-tag').close();
+  zeigeStatus(`Für ${tagText(b.dataset.tag)} eingeplant.`);
+});
+
+/* Wochenansicht bedienen */
+
+$('#woche-zurueck').addEventListener('click', () => { planWoche = plusTage(planWoche, -7); zeichnePlan(); });
+$('#woche-vor').addEventListener('click', () => { planWoche = plusTage(planWoche, 7); zeichnePlan(); });
+$('#woche-heute').addEventListener('click', () => { planWoche = montagVon(new Date()); zeichnePlan(); });
+
+$('#woche-tage').addEventListener('click', (e) => {
+  const neu = e.target.closest('[data-plan-tag]');
+  if (neu) { oeffnePlanen(neu.dataset.planTag); return; }
+  const weg = e.target.closest('[data-plan-weg]');
+  if (weg) {
+    daten.plan = daten.plan.filter((p) => p.id !== weg.dataset.planWeg);
+    merkeGeloescht('plan', weg.dataset.planWeg);
+    speichere();
+    zeichnePlan();
+    return;
+  }
+  const rezept = e.target.closest('[data-rezept]');
+  if (rezept) oeffneRezept(rezept.dataset.rezept);
+});
+
+// Zutaten aller Gerichte der Woche – in der laufenden Woche erst ab heute.
+$('#woche-einkaufen').addEventListener('click', () => {
+  const heute = heuteIso();
+  const tage = Array.from({ length: 7 }, (_, i) => isoTag(plusTage(planWoche, i)));
+  const abHeute = tage.includes(heute);
+  const quellen = tage.filter((t) => !abHeute || t >= heute).flatMap((tag) => eintraegeAm(tag).map((p) => {
+    const r = planRezept(p);
+    return r && r.zutaten.length ? { rezept: r, faktor: 1, titel: `${tagText(tag, false)} · ${r.titel}` } : null;
+  })).filter(Boolean);
+  if (!quellen.length) {
+    zeigeStatus(abHeute ? 'Ab heute ist in dieser Woche nichts mit Zutaten geplant.' : 'In dieser Woche ist nichts mit Zutaten geplant.');
+    return;
+  }
+  oeffneEinkaufen(quellen, `${quellen.length} ${quellen.length === 1 ? 'Gericht' : 'Gerichte'}${abHeute ? ' ab heute' : ''}, ${$('#woche-titel').textContent}. Was du schon da hast, wählst du ab.`);
+});
+
+/* ---------- Rezept in Sammlungen einordnen ---------- */
+
+let zuordnenRezept = null;
+
+function oeffneZuordnung(r) {
+  zuordnenRezept = r;
+  const form = $('#form-zuordnen');
+  form.neu.value = '';
+  $('#zuordnen-hinweis').textContent = r.titel;
+  const liste = alleSammlungen();
+  $('#zuordnen-liste').innerHTML = liste.length
+    ? liste.map((s) => `<label><input type="checkbox" value="${esc(s.name)}" ${inSammlung(r, s.name) ? 'checked' : ''}> <span>📁 ${esc(s.name)} <small>(${s.rezepte.length})</small></span></label>`).join('')
+    : '<p class="hinweis">Noch keine Sammlungen. Gib unten einen Namen ein, um die erste anzulegen.</p>';
+  oeffneDialog($('#dlg-zuordnen'));
+  if (!liste.length) setTimeout(() => form.neu.focus(), 50);
+}
+
+$('#form-zuordnen').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const r = rezeptMitId(zuordnenRezept.id);
+  if (!r) { $('#dlg-zuordnen').close(); return; }
+  const gewaehlt = [...document.querySelectorAll('#zuordnen-liste input:checked')].map((b) => b.value);
+  const neu = sammlungsName(e.target.neu.value);
+  if (neu) {
+    // Gibt es den Namen schon (andere Schreibweise), die vorhandene Sammlung nehmen.
+    const vorhanden = alleSammlungen().find((s) => gleicherName(s.name, neu));
+    const name = vorhanden ? vorhanden.name : neu;
+    if (!gewaehlt.some((s) => gleicherName(s, name))) gewaehlt.push(name);
+  }
+  const vorher = JSON.stringify(r.sammlungen || []);
+  r.sammlungen = gewaehlt;
+  $('#dlg-zuordnen').close();
+  if (JSON.stringify(r.sammlungen) === vorher) return;
+  merke('rezepte', r);
+  speichere();
+  zeichneRezept();
+  zeigeStatus(gewaehlt.length ? `In ${gewaehlt.length === 1 ? `„${gewaehlt[0]}“` : `${gewaehlt.length} Sammlungen`}.` : 'Aus allen Sammlungen genommen.');
+});
+
+/* ---------- Sammlung anlegen, bearbeiten, auflösen ---------- */
+
+let sammlungDialog = { alt: '', auswahl: new Set() };
+
+function oeffneSammlungsDialog(name) {
+  sammlungDialog = { alt: name, auswahl: new Set(name ? sammlungsRezepte(name).map((r) => r.id) : []) };
+  const form = $('#form-sammlung');
+  $('#sammlung-titel').textContent = name ? 'Sammlung bearbeiten' : 'Neue Sammlung';
+  form.name.value = name;
+  $('#sammlung-suche').value = '';
+  $('#sammlung-aufloesen').hidden = !name;
+  form.querySelector('.fehler').hidden = true;
+  const rezepte = [...daten.rezepte].sort((a, b) => a.titel.localeCompare(b.titel, 'de'));
+  $('#sammlung-auswahl').innerHTML = rezepte.map((r) => `<label data-suchtext="${esc([r.titel, ...(r.kategorien || [])].join(' ').toLowerCase())}">
+      <input type="checkbox" value="${esc(r.id)}" ${sammlungDialog.auswahl.has(r.id) ? 'checked' : ''}>
+      <span>${esc(r.titel)}${(r.sammlungen || []).length ? `<small>📁 ${esc(r.sammlungen.join(', '))}</small>` : ''}</span>
+    </label>`).join('');
+  zeigeSammlungsZahl();
+  oeffneDialog($('#dlg-sammlung'));
+  $('#dlg-sammlung').scrollTop = 0;
+  if (!name) setTimeout(() => form.name.focus(), 50);
+}
+
+function zeigeSammlungsZahl() {
+  const n = sammlungDialog.auswahl.size;
+  $('#sammlung-zahl').textContent = `(${n} ausgewählt)`;
+}
+
+$('#sammlung-auswahl').addEventListener('change', (e) => {
+  const box = e.target.closest('input[type="checkbox"]');
+  if (!box) return;
+  if (box.checked) sammlungDialog.auswahl.add(box.value);
+  else sammlungDialog.auswahl.delete(box.value);
+  zeigeSammlungsZahl();
+});
+
+$('#sammlung-suche').addEventListener('input', (e) => {
+  const begriffe = e.target.value.toLowerCase().split(/\s+/).filter(Boolean);
+  for (const zeile of document.querySelectorAll('#sammlung-auswahl label')) {
+    zeile.hidden = !begriffe.every((b) => zeile.dataset.suchtext.includes(b));
+  }
+});
+
+$('#form-sammlung').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const fehler = form.querySelector('.fehler');
+  const zeigeFehler = (text) => { fehler.textContent = text; fehler.hidden = false; };
+  const name = sammlungsName(form.name.value);
+  const alt = sammlungDialog.alt;
+  if (!name) { zeigeFehler('Bitte gib der Sammlung einen Namen.'); form.name.focus(); return; }
+  const andere = alleSammlungen().find((s) => gleicherName(s.name, name) && !(alt && gleicherName(s.name, alt)));
+  if (andere) { zeigeFehler(`Eine Sammlung „${andere.name}“ gibt es schon.`); return; }
+  if (!sammlungDialog.auswahl.size) {
+    zeigeFehler(alt ? 'Wähle mindestens ein Rezept aus – oder löse die Sammlung mit „Auflösen“ auf.' : 'Wähle mindestens ein Rezept für die Sammlung aus.');
+    return;
+  }
+  let geaendert = 0;
+  for (const r of daten.rezepte) {
+    if (setzeSammlung(r, name, sammlungDialog.auswahl.has(r.id), alt || name)) {
+      merke('rezepte', r);
+      geaendert++;
+    }
+  }
+  if (geaendert) speichere();
+  $('#dlg-sammlung').close();
+  if (ansicht === 'sammlung') {
+    offeneSammlung = name;
+    history.replaceState({ sammlung: name }, '');
+    zeichneSammlung();
+  } else {
+    zeigeSammlung(name);
+  }
+  zeigeStatus(alt ? 'Sammlung gespeichert.' : `Sammlung „${name}“ angelegt.`);
+});
+
+$('#sammlung-aufloesen').addEventListener('click', () => {
+  const name = sammlungDialog.alt;
+  if (!confirm(`Sammlung „${name}“ auflösen? Die Rezepte selbst bleiben erhalten.`)) return;
+  for (const r of daten.rezepte) {
+    if (setzeSammlung(r, name, false)) merke('rezepte', r);
+  }
+  speichere();
+  $('#dlg-sammlung').close();
+  if (history.state && history.state.sammlung) history.back();
+  else zeigeAnsicht('liste');
+  zeigeStatus(`Sammlung „${name}“ aufgelöst.`);
+});
+
 /* ================= Ereignisse ================= */
 
 document.querySelector('.navi').addEventListener('click', (e) => {
   const b = e.target.closest('[data-ansicht]');
   if (!b) return;
-  if (ansicht === 'rezept') history.replaceState(null, '');
+  if (ansicht === 'rezept' || ansicht === 'sammlung') history.replaceState(null, '');
   zeigeAnsicht(b.dataset.ansicht);
 });
 
 $('#zurueck').addEventListener('click', () => {
-  if (history.state && history.state.rezept) history.back();
-  else zeigeAnsicht('liste');
+  if (history.state && (history.state.rezept || history.state.sammlung)) history.back();
+  else zeigeAnsicht(ansicht === 'rezept' ? rueckAnsicht : 'liste');
 });
 
 window.addEventListener('popstate', (e) => {
   if (e.state && e.state.rezept && rezeptMitId(e.state.rezept)) oeffneRezept(e.state.rezept, false);
-  else if (ansicht === 'rezept') zeigeAnsicht('liste');
+  else if (e.state && e.state.sammlung) zeigeSammlung(e.state.sammlung, false);
+  else if (ansicht === 'rezept' || ansicht === 'sammlung') zeigeAnsicht(ansicht === 'rezept' ? rueckAnsicht : 'liste');
 });
 
-$('#neu').addEventListener('click', () => oeffneImport());
-$('#bearbeiten').addEventListener('click', () => oeffneFormular(rezeptMitId(offenesRezept.id)));
+$('#neu').addEventListener('click', () => {
+  importZiel = ansicht === 'sammlung' ? offeneSammlung : '';
+  oeffneImport();
+});
+$('#bearbeiten').addEventListener('click', () => {
+  if (ansicht === 'sammlung') oeffneSammlungsDialog(offeneSammlung);
+  else oeffneFormular(rezeptMitId(offenesRezept.id));
+});
+$('#sammlung-bearbeiten').addEventListener('click', () => oeffneSammlungsDialog(offeneSammlung));
+$('#sammlung-liste').addEventListener('click', (e) => {
+  const karte = e.target.closest('[data-rezept]');
+  if (karte) oeffneRezept(karte.dataset.rezept);
+});
+$('#sammlungen').addEventListener('click', (e) => {
+  const karte = e.target.closest('[data-sammlung]');
+  if (karte) zeigeSammlung(karte.dataset.sammlung);
+  else if (e.target.closest('[data-aktion="neue-sammlung"]')) oeffneSammlungsDialog('');
+});
 $('#suche').addEventListener('input', zeichneListe);
 $('#sortierung').addEventListener('change', zeichneListe);
 
@@ -1625,7 +2153,10 @@ $('#filter').addEventListener('click', (e) => {
 $('#liste').addEventListener('click', (e) => {
   const karte = e.target.closest('[data-rezept]');
   if (karte) oeffneRezept(karte.dataset.rezept);
-  if (e.target.closest('[data-aktion="neu"]')) oeffneImport();
+  if (e.target.closest('[data-aktion="neu"]')) {
+    importZiel = '';
+    oeffneImport();
+  }
 });
 
 $('#rezept-detail').addEventListener('click', async (e) => {
@@ -1646,6 +2177,8 @@ $('#rezept-detail').addEventListener('click', async (e) => {
   }
   const portion = e.target.closest('[data-portion]');
   if (portion) { aenderePortionen(Number(portion.dataset.portion)); return; }
+  const sammlungLink = e.target.closest('[data-sammlung-link]');
+  if (sammlungLink) { zeigeSammlung(sammlungLink.dataset.sammlungLink); return; }
 
   const aktion = e.target.closest('[data-aktion]');
   if (!aktion) return;
@@ -1658,6 +2191,12 @@ $('#rezept-detail').addEventListener('click', async (e) => {
       break;
     case 'einkaufen':
       oeffneEinkaufen();
+      break;
+    case 'planen':
+      oeffneTagWahl(r);
+      break;
+    case 'sammlungen':
+      oeffneZuordnung(r);
       break;
     case 'kochmodus':
       setzeKochmodus(!kochmodus);
@@ -1748,7 +2287,7 @@ function zeichneSyncEinstellungen() {
     : 'Deine Rezepte sind nur auf diesem Handy gespeichert. Mit einer Sicherungsdatei kannst du sie aufbewahren oder auf ein anderes Handy übertragen.';
   if (!an) return;
   const s = daten.einstellungen.sync;
-  const offen = Object.keys(daten.ausstehend.rezepte).length + Object.keys(daten.ausstehend.einkauf).length;
+  const offen = Object.keys(daten.ausstehend.rezepte).length + Object.keys(daten.ausstehend.einkauf).length + Object.keys(daten.ausstehend.plan).length;
   let text = `✅ Verbunden mit deinem Google Sheet. Zuletzt abgeglichen: ${zeitpunktText(s.zuletzt)}.`;
   if (offen) text += ` ${offen} ${offen === 1 ? 'Änderung wartet' : 'Änderungen warten'} noch auf den Abgleich.`;
   if (s.fehler) text += ` ⚠ ${s.fehler}`;
@@ -1844,7 +2383,7 @@ $('#proxy').addEventListener('change', (e) => {
 
 $('#exportieren').addEventListener('click', async () => {
   // Ohne Zugangsdaten zum Google Sheet, die gehören nicht in eine Datei auf Google Drive.
-  const sicherung = { version: daten.version, rezepte: daten.rezepte, einkauf: daten.einkauf, einstellungen: { proxy: daten.einstellungen.proxy } };
+  const sicherung = { version: daten.version, rezepte: daten.rezepte, einkauf: daten.einkauf, plan: daten.plan, einstellungen: { proxy: daten.einstellungen.proxy } };
   // Eigene Fotos kommen mit in die Datei, damit sie beim Zurückholen nicht fehlen.
   const fotos = {};
   for (const r of daten.rezepte) {
@@ -1893,7 +2432,10 @@ $('#import-datei').addEventListener('change', async (e) => {
       } else if (istLokalesFoto(foto)) {
         foto = '';
       }
-      const rezept = neuesRezept({ ...r, foto, id: r.id || neueId(), zutaten: alsListe(r.zutaten).map(String), schritte: alsListe(r.schritte).map(String) });
+      const rezept = neuesRezept({
+        ...r, foto, id: r.id || neueId(), zutaten: alsListe(r.zutaten).map(String), schritte: alsListe(r.schritte).map(String),
+        sammlungen: alsListe(r.sammlungen).map(sammlungsName).filter(Boolean),
+      });
       daten.rezepte.push(rezept);
       merke('rezepte', rezept);
       dazu++;
@@ -1904,6 +2446,13 @@ $('#import-datei').addEventListener('change', async (e) => {
       const posten = { id: p.id || neueId(), text: String(p.text), erledigt: Boolean(p.erledigt), rezept: p.rezept || '' };
       daten.einkauf.push(posten);
       merke('einkauf', posten);
+    }
+    const planIds = new Set(daten.plan.map((p) => p.id));
+    for (const p of alsListe(neu.plan)) {
+      if (!p || !ISO_TAG.test(p.datum || '') || planIds.has(p.id) || !(p.rezept || p.name)) continue;
+      const eintrag = { id: p.id || neueId(), datum: p.datum, rezept: String(p.rezept || ''), name: String(p.name || '') };
+      daten.plan.push(eintrag);
+      merke('plan', eintrag);
     }
     speichere();
     for (const r of daten.rezepte) if (istLokalesFoto(r.foto)) fotosInArbeit.delete(r.foto);
@@ -1925,6 +2474,7 @@ function geteilteUrl() {
   return url;
 }
 
+raeumePlanAuf();
 const einladung = leseEinladung();
 history.replaceState(null, '');
 zeigeAnsicht('liste');

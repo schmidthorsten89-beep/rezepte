@@ -25,6 +25,7 @@
   <main>
     <section id="ansicht-liste" class="ansicht">
       <input id="suche" type="search" placeholder="Rezept oder Zutat suchen …" aria-label="Rezepte durchsuchen" autocomplete="off">
+      <section id="sammlungen" class="sammlungen" aria-label="Sammlungen" hidden></section>
       <div id="filter" class="chips"></div>
       <div class="sortierung">
         <span id="anzahl"></span>
@@ -39,8 +40,31 @@
       <div id="liste" class="karten"></div>
     </section>
 
+    <section id="ansicht-sammlung" class="ansicht" hidden>
+      <div class="sortierung">
+        <span id="sammlung-anzahl"></span>
+        <button id="sammlung-bearbeiten" type="button">✎ Rezepte auswählen</button>
+      </div>
+      <div id="sammlung-liste" class="karten"></div>
+    </section>
+
     <section id="ansicht-rezept" class="ansicht" hidden>
       <div id="rezept-detail"></div>
+    </section>
+
+    <section id="ansicht-plan" class="ansicht" hidden>
+      <div class="woche-kopf">
+        <button id="woche-zurueck" type="button" aria-label="Vorige Woche">‹</button>
+        <div class="woche-titel">
+          <strong id="woche-titel"></strong>
+          <button id="woche-heute" class="text-knopf" type="button" hidden>Zur aktuellen Woche</button>
+        </div>
+        <button id="woche-vor" type="button" aria-label="Nächste Woche">›</button>
+      </div>
+      <div id="woche-tage"></div>
+      <div class="knoepfe">
+        <button id="woche-einkaufen" type="button">🛒 Zutaten auf die Einkaufsliste</button>
+      </div>
     </section>
 
     <section id="ansicht-einkauf" class="ansicht" hidden>
@@ -61,6 +85,7 @@
 
   <nav class="navi">
     <button type="button" data-ansicht="liste" class="aktiv"><span aria-hidden="true">🍲</span>Rezepte</button>
+    <button type="button" data-ansicht="plan"><span aria-hidden="true">📅</span>Wochenplan</button>
     <button type="button" data-ansicht="einkauf"><span aria-hidden="true">🛒</span>Einkaufsliste<b id="einkauf-zahl" class="zahl" hidden></b></button>
   </nav>
 
@@ -68,6 +93,7 @@
   <dialog id="dlg-import">
     <h2>Rezept hinzufügen</h2>
     <p class="hinweis">Füge den Link zu einem Rezept ein, z. B. von Chefkoch. Zutaten und Zubereitung werden automatisch übernommen.</p>
+    <p id="import-ziel" class="hinweis" hidden></p>
     <form id="form-import" novalidate>
       <div class="suchzeile">
         <input name="url" type="url" inputmode="url" placeholder="https://www.chefkoch.de/rezepte/…" aria-label="Link zum Rezept" autocomplete="off" enterkeyhint="go">
@@ -139,6 +165,66 @@
         <span class="platz"></span>
         <button type="button" data-schliessen>Abbrechen</button>
         <button id="einkaufen-ok" class="haupt" type="submit">Hinzufügen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Gerichte für einen Tag auswählen -->
+  <dialog id="dlg-planen" class="gross">
+    <form id="form-planen" novalidate>
+      <h2 id="planen-titel">Gerichte auswählen</h2>
+      <input id="planen-suche" type="search" placeholder="Rezept suchen …" aria-label="Rezepte durchsuchen" autocomplete="off">
+      <div id="planen-filter" class="chips"></div>
+      <div id="planen-liste" class="auswahl planen-liste"></div>
+      <label class="klein-abstand">Etwas anderes <input name="frei" maxlength="100" autocomplete="off" placeholder="z. B. Reste, Essen gehen, Pizza bestellen" enterkeyhint="done"></label>
+      <div class="knoepfe">
+        <span class="platz"></span>
+        <button type="button" data-schliessen>Abbrechen</button>
+        <button id="planen-ok" class="haupt" type="submit">Hinzufügen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ein Rezept für einen Tag einplanen -->
+  <dialog id="dlg-tag">
+    <h2>Wann kochen?</h2>
+    <p id="tag-hinweis" class="hinweis"></p>
+    <div id="tag-liste" class="tag-liste"></div>
+    <div class="knoepfe">
+      <span class="platz"></span>
+      <button type="button" data-schliessen>Abbrechen</button>
+    </div>
+  </dialog>
+
+  <!-- Ein Rezept in Sammlungen einordnen -->
+  <dialog id="dlg-zuordnen">
+    <form id="form-zuordnen" novalidate>
+      <h2>Sammlungen</h2>
+      <p id="zuordnen-hinweis" class="hinweis"></p>
+      <div id="zuordnen-liste" class="auswahl"></div>
+      <label class="klein-abstand">Neue Sammlung <input name="neu" maxlength="60" autocomplete="off" placeholder="z. B. Weihnachten" enterkeyhint="done"></label>
+      <div class="knoepfe">
+        <span class="platz"></span>
+        <button type="button" data-schliessen>Abbrechen</button>
+        <button class="haupt" type="submit">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Sammlung anlegen oder bearbeiten -->
+  <dialog id="dlg-sammlung" class="gross">
+    <form id="form-sammlung" novalidate>
+      <h2 id="sammlung-titel">Neue Sammlung</h2>
+      <label>Name * <input name="name" maxlength="60" required autocomplete="off" placeholder="z. B. Weihnachten, Grillabend, Schnell & einfach"></label>
+      <p class="feld-titel">Rezepte in dieser Sammlung <span id="sammlung-zahl"></span></p>
+      <input id="sammlung-suche" type="search" placeholder="Rezepte durchsuchen …" aria-label="Rezepte durchsuchen" autocomplete="off">
+      <div id="sammlung-auswahl" class="auswahl"></div>
+      <p class="fehler" hidden></p>
+      <div class="knoepfe">
+        <button id="sammlung-aufloesen" class="gefahr" type="button" hidden>Auflösen</button>
+        <span class="platz"></span>
+        <button type="button" data-schliessen>Abbrechen</button>
+        <button class="haupt" type="submit">Speichern</button>
       </div>
     </form>
   </dialog>
